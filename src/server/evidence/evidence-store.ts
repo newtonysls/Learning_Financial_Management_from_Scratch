@@ -72,6 +72,9 @@ function assertSourceGrade(value: unknown): asserts value is SourceGrade {
 function cloneRecord(record: EvidenceRecord): EvidenceRecord {
   return {
     ...record,
+    sourceUrls: record.sourceUrls
+      ? [...record.sourceUrls]
+      : undefined,
     locator: record.locator ? { ...record.locator } : undefined,
   };
 }
