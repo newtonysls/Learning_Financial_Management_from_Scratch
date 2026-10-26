@@ -118,6 +118,7 @@ describe("safeFetchJson", () => {
         maxResponseBytes: 8,
       }),
     ).rejects.toThrow("response body");
+    expect(oversized).toHaveBeenCalledTimes(1);
   });
 
   test("aborts requests at the configured bounded timeout", async () => {

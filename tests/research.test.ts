@@ -130,6 +130,22 @@ describe("buildResearchPackage", () => {
       },
     ]);
   });
+
+  test("clamps calendar-month windows at month end", async () => {
+    const sources = createSources();
+    sources.fetchPriceHistory = vi.fn().mockResolvedValue([
+      { date: "2026-02-28", close: 120 },
+      { date: "2026-03-31", close: 90 },
+    ]);
+
+    const result = await buildResearchPackage({
+      stock,
+      sources,
+      now: () => "2026-03-31T12:00:00.000Z",
+    });
+
+    expect(result.drawdowns.monthly?.rate).toBeCloseTo(-0.25);
+  });
 });
 
 function createSources(): ResearchSources {
