@@ -1,9 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import readXlsxFile, {
-  readSheetNames,
-} from "read-excel-file/node";
+import readXlsxFile from "read-excel-file/node";
 import type { EvidenceRecord } from "../../shared/types";
 import { hashContent } from "../evidence/evidence-store";
 
@@ -127,25 +125,19 @@ async function parseWorkbook(
   context: DocumentContext,
 ): Promise<EvidenceRecord[]> {
   validateXlsxArchive(bytes);
-  let sheetNames: string[];
+  let sheets: Awaited<ReturnType<typeof readXlsxFile>>;
   try {
-    sheetNames = await readSheetNames(bytes);
+    sheets = await readXlsxFile(bytes);
   } catch {
     throw new Error("XLSX file structure is invalid");
   }
-  if (sheetNames.length > 1_000) {
+  if (sheets.length > 1_000) {
     throw new Error("XLSX sheet count exceeds the allowed limit");
   }
 
   const records: EvidenceRecord[] = [];
   let extractedBytes = 0;
-  for (const sheet of sheetNames) {
-    let rows: Awaited<ReturnType<typeof readXlsxFile>>;
-    try {
-      rows = await readXlsxFile(bytes, { sheet });
-    } catch {
-      throw new Error(`XLSX sheet could not be parsed: ${sheet}`);
-    }
+  for (const { sheet, data: rows } of sheets) {
     if (rows.length > MAX_SHEET_ROWS) {
       throw new Error("XLSX row count exceeds the allowed limit");
     }
