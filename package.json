@@ -10,8 +10,13 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "fflate": "^0.8.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.4.299",
+    "read-excel-file": "^9.3.12"
   }
 }
