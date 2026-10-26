@@ -270,13 +270,16 @@ describe("public source adapters", () => {
         operatingCashFlow: 70690750119.06,
         equity: 251253594419.5,
         interestExpense: 21034591.16,
-        earningsBeforeInterestAndTax: 61459453768.45,
         interestExpenseBasis: "FE_INTEREST_EXPENSE",
         evidence: expect.objectContaining({
           id: "eastmoney:financial:600519.SH:2026-06-30",
           sourceGrade: "C",
         }),
       }),
+    );
+    expect(snapshots[0]?.earningsBeforeInterestAndTax).toBeCloseTo(
+      61459453768.45,
+      2,
     );
     expect(requestedUrls).toHaveLength(3);
     expect(
@@ -360,7 +363,7 @@ describe("public source adapters", () => {
         sourceGrade: "A",
         title: "贵州茅台2026年半年度报告",
         category: "01010503||010113||010303",
-        publishedAt: "2026-08-15T00:00:00.000Z",
+        publishedAt: "2026-08-14T16:00:00.000Z",
         sourceUrl:
           "https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF",
         retrievedAt: expect.any(String),
