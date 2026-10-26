@@ -1,16 +1,22 @@
 import type {
   CompanyProfile,
+  EvidenceRecord,
   FinancialSnapshot,
   PricePoint,
   StockId,
 } from "../../shared/types";
+import { assertStockId } from "../domain/stock-id";
+import { hashContent } from "../evidence/evidence-store";
 import { safeFetchJson } from "./http";
 
 const QUOTE_HOST = "push2.eastmoney.com";
 const HISTORY_HOST = "push2his.eastmoney.com";
-const FINANCIAL_HOST = "datacenter-web.eastmoney.com";
+const FINANCIAL_HOST = "datacenter.eastmoney.com";
+const FINANCIAL_ENDPOINT = `https://${FINANCIAL_HOST}/securities/api/data/get`;
 
 interface EastmoneyEnvelope<T> {
+  success?: boolean;
+  message?: string;
   data?: T | null;
   result?: {
     data?: T[] | null;
@@ -29,10 +35,49 @@ interface HistoryPayload {
   klines?: unknown;
 }
 
+type FinancialStatement = Record<string, unknown>;
+
+const BALANCE_FIELDS = [
+  "SECUCODE",
+  "SECURITY_CODE",
+  "REPORT_DATE",
+  "REPORT_TYPE",
+  "CURRENCY",
+  "TOTAL_ASSETS",
+  "TOTAL_CURRENT_ASSETS",
+  "INVENTORY",
+  "TOTAL_CURRENT_LIAB",
+  "TOTAL_LIABILITIES",
+  "TOTAL_PARENT_EQUITY",
+] as const;
+
+const INCOME_FIELDS = [
+  "SECUCODE",
+  "SECURITY_CODE",
+  "REPORT_DATE",
+  "REPORT_TYPE",
+  "CURRENCY",
+  "TOTAL_OPERATE_INCOME",
+  "OPERATE_COST",
+  "PARENT_NETPROFIT",
+  "FE_INTEREST_EXPENSE",
+  "TOTAL_PROFIT",
+] as const;
+
+const CASHFLOW_FIELDS = [
+  "SECUCODE",
+  "SECURITY_CODE",
+  "REPORT_DATE",
+  "REPORT_TYPE",
+  "CURRENCY",
+  "NETCASH_OPERATE",
+] as const;
+
 export async function fetchCompanyProfile(
   stock: StockId,
 ): Promise<CompanyProfile> {
-  const url = buildQuoteUrl(stock);
+  const normalizedStock = assertStockId(stock);
+  const url = buildQuoteUrl(normalizedStock);
   const envelope = await safeFetchJson<EastmoneyEnvelope<QuotePayload>>(
     url,
     { allowedHosts: [QUOTE_HOST] },
@@ -41,14 +86,29 @@ export async function fetchCompanyProfile(
     throw new Error("Eastmoney quote response has no data");
   }
 
-  return {
-    stock: { ...stock },
+  const retrievedAt = new Date().toISOString();
+  const normalizedProfile = {
+    stock: { ...normalizedStock },
     name: toText(envelope.data.f58),
     industry: toText(envelope.data.f127),
     latestPrice: scaleEastmoneyPrice(envelope.data.f43),
     marketCapitalization: toFiniteNumber(envelope.data.f116),
     sourceUrl: url.toString(),
-    retrievedAt: new Date().toISOString(),
+    retrievedAt,
+  };
+  const content = JSON.stringify(normalizedProfile);
+  return {
+    ...normalizedProfile,
+    evidence: {
+      id: `eastmoney:profile:${normalizedStock.canonical}`,
+      sourceGrade: "C",
+      title: `${normalizedStock.canonical} 公司概况`,
+      content,
+      contentType: "text/plain",
+      contentHash: hashContent(content),
+      sourceUrl: url.toString(),
+      retrievedAt,
+    },
   };
 }
 
@@ -56,8 +116,9 @@ export async function fetchPriceHistory(
   stock: StockId,
   days: number,
 ): Promise<PricePoint[]> {
+  const normalizedStock = assertStockId(stock);
   const boundedDays = validateDays(days);
-  const url = buildHistoryUrl(stock, boundedDays);
+  const url = buildHistoryUrl(normalizedStock, boundedDays);
   const envelope = await safeFetchJson<
     EastmoneyEnvelope<HistoryPayload>
   >(url, { allowedHosts: [HISTORY_HOST] });
@@ -66,7 +127,7 @@ export async function fetchPriceHistory(
     throw new Error("Eastmoney history response has no price series");
   }
 
-  return klines.flatMap((entry): PricePoint[] => {
+  const normalizedPoints = klines.flatMap((entry): PricePoint[] => {
     if (typeof entry !== "string") {
       return [];
     }
@@ -83,86 +144,167 @@ export async function fetchPriceHistory(
     }
     return [{ date, close }];
   });
+  if (normalizedPoints.length === 0) {
+    throw new Error("Eastmoney history response has no usable prices");
+  }
+  const retrievedAt = new Date().toISOString();
+  const content = JSON.stringify(normalizedPoints);
+  const evidence: EvidenceRecord = {
+    id: `eastmoney:prices:${normalizedStock.canonical}`,
+    sourceGrade: "C",
+    title: `${normalizedStock.canonical} 历史行情`,
+    content,
+    contentType: "text/plain",
+    contentHash: hashContent(content),
+    sourceUrl: url.toString(),
+    retrievedAt,
+  };
+  return normalizedPoints.map((point) => ({ ...point, evidence }));
 }
 
 export async function fetchFinancials(
   stock: StockId,
 ): Promise<FinancialSnapshot[]> {
-  const url = buildFinancialUrl(stock);
-  const envelope = await safeFetchJson<
-    EastmoneyEnvelope<Record<string, unknown>>
-  >(url, {
-    allowedHosts: [FINANCIAL_HOST],
-    maxResponseBytes: 5 * 1024 * 1024,
-  });
-  const rows = envelope.result?.data;
-  if (!Array.isArray(rows)) {
-    throw new Error("Eastmoney financial response has no records");
-  }
-
+  const normalizedStock = assertStockId(stock);
+  const urls = {
+    balance: buildFinancialUrl(
+      normalizedStock,
+      "RPT_F10_FINANCE_GBALANCE",
+      "F10_FINANCE_GBALANCE",
+    ),
+    income: buildFinancialUrl(
+      normalizedStock,
+      "RPT_F10_FINANCE_GINCOME",
+      "APP_F10_GINCOME",
+    ),
+    cashflow: buildFinancialUrl(
+      normalizedStock,
+      "RPT_F10_FINANCE_GCASHFLOW",
+      "APP_F10_GCASHFLOW",
+    ),
+  };
+  const [balanceResponse, incomeResponse, cashflowResponse] =
+    await Promise.all([
+      fetchFinancialStatement(urls.balance),
+      fetchFinancialStatement(urls.income),
+      fetchFinancialStatement(urls.cashflow),
+    ]);
+  const balances = validatedStatementRows(
+    balanceResponse,
+    "balance",
+    BALANCE_FIELDS,
+    normalizedStock,
+  );
+  const incomes = validatedStatementRows(
+    incomeResponse,
+    "income",
+    INCOME_FIELDS,
+    normalizedStock,
+  );
+  const cashflows = validatedStatementRows(
+    cashflowResponse,
+    "cashflow",
+    CASHFLOW_FIELDS,
+    normalizedStock,
+  );
+  const incomeByPeriod = indexStatements(incomes);
+  const cashflowByPeriod = indexStatements(cashflows);
   const retrievedAt = new Date().toISOString();
-  return rows.flatMap((row): FinancialSnapshot[] => {
-    const values = {
-      totalAssets: pickFinite(row, "TOTAL_ASSETS"),
-      totalLiabilities: pickFinite(row, "TOTAL_LIABILITIES"),
-      currentAssets: pickFinite(
-        row,
-        "TOTAL_CURRENT_ASSETS",
-        "CURRENT_ASSETS",
-      ),
-      inventory: pickFinite(row, "INVENTORY"),
-      currentLiabilities: pickFinite(
-        row,
-        "TOTAL_CURRENT_LIAB",
-        "CURRENT_LIABILITIES",
-      ),
-      revenue: pickFinite(
-        row,
-        "TOTAL_OPERATE_INCOME",
-        "OPERATE_INCOME",
-      ),
-      costOfRevenue: pickFinite(
-        row,
-        "OPERATE_COST",
-        "TOTAL_OPERATE_COST",
-      ),
-      netIncome: pickFinite(
-        row,
-        "PARENT_NETPROFIT",
-        "NETPROFIT",
-      ),
-      operatingCashFlow: pickFinite(
-        row,
-        "NETCASH_OPERATE",
-        "NET_CASH_FLOW",
-      ),
-      equity: pickFinite(
-        row,
-        "PARENT_EQUITY",
-        "TOTAL_EQUITY",
-      ),
-      interestExpense: pickFinite(row, "INTEREST_EXPENSE"),
-      earningsBeforeInterestAndTax: pickFinite(row, "EBIT"),
-    };
-    if (Object.values(values).some((value) => value === null)) {
-      return [];
-    }
-
-    const reportDate = normalizeDate(
-      row.REPORT_DATE ?? row.REPORTDATE,
-    );
-    return [
-      {
-        reportDate: reportDate ?? undefined,
-        ...(values as Omit<
-          FinancialSnapshot,
-          "reportDate" | "sourceUrl" | "retrievedAt"
-        >),
-        sourceUrl: url.toString(),
+  const sourceUrls = Object.values(urls).map((url) => url.toString());
+  const snapshots = balances.flatMap(
+    (balance): FinancialSnapshot[] => {
+      const key = statementKey(balance);
+      const income = incomeByPeriod.get(key);
+      const cashflow = cashflowByPeriod.get(key);
+      if (!income || !cashflow) {
+        return [];
+      }
+      const reportDate = normalizeDate(balance.REPORT_DATE);
+      const reportType = toText(balance.REPORT_TYPE);
+      const currency = toText(balance.CURRENCY);
+      if (!reportDate || !reportType || !currency) {
+        throw new Error(
+          "Eastmoney financial source contract has invalid period metadata",
+        );
+      }
+      const interestExpense = requireFinite(
+        income,
+        "FE_INTEREST_EXPENSE",
+      );
+      const snapshotBase = {
+        reportDate,
+        reportType,
+        periodScope:
+          reportType === "年报"
+            ? ("annual" as const)
+            : ("year-to-date" as const),
+        annualized: false as const,
+        currency,
+        totalAssets: requireFinite(balance, "TOTAL_ASSETS"),
+        totalLiabilities: requireFinite(
+          balance,
+          "TOTAL_LIABILITIES",
+        ),
+        currentAssets: requireFinite(
+          balance,
+          "TOTAL_CURRENT_ASSETS",
+        ),
+        inventory: requireFinite(balance, "INVENTORY"),
+        currentLiabilities: requireFinite(
+          balance,
+          "TOTAL_CURRENT_LIAB",
+        ),
+        revenue: requireFinite(income, "TOTAL_OPERATE_INCOME"),
+        costOfRevenue: requireFinite(income, "OPERATE_COST"),
+        netIncome: requireFinite(income, "PARENT_NETPROFIT"),
+        operatingCashFlow: requireFinite(
+          cashflow,
+          "NETCASH_OPERATE",
+        ),
+        equity: requireFinite(balance, "TOTAL_PARENT_EQUITY"),
+        interestExpense,
+        earningsBeforeInterestAndTax:
+          requireFinite(income, "TOTAL_PROFIT") + interestExpense,
+        interestExpenseBasis:
+          "FE_INTEREST_EXPENSE" as const,
+        sourceUrl: urls.balance.toString(),
         retrievedAt,
-      },
-    ];
-  });
+      };
+      const content = JSON.stringify({
+        ...snapshotBase,
+        sourceUrls,
+        accountingBasis: {
+          revenue: "TOTAL_OPERATE_INCOME",
+          costOfRevenue: "OPERATE_COST",
+          netIncome: "PARENT_NETPROFIT",
+          operatingCashFlow: "NETCASH_OPERATE",
+          equity: "TOTAL_PARENT_EQUITY",
+          ebit:
+            "TOTAL_PROFIT + FE_INTEREST_EXPENSE",
+        },
+      });
+      const evidence: EvidenceRecord = {
+        id: `eastmoney:financial:${normalizedStock.canonical}:${reportDate}`,
+        sourceGrade: "C",
+        title: `${normalizedStock.canonical} ${reportDate} 财务报表`,
+        content,
+        contentType: "text/plain",
+        contentHash: hashContent(content),
+        sourceUrl: urls.balance.toString(),
+        sourceUrls,
+        retrievedAt,
+      };
+      return [{ ...snapshotBase, evidence }];
+    },
+  );
+  if (snapshots.length === 0) {
+    throw new Error(
+      "Eastmoney financial source contract has no joinable complete periods",
+    );
+  }
+  return snapshots.sort((left, right) =>
+    (right.reportDate ?? "").localeCompare(left.reportDate ?? ""),
+  );
 }
 
 function buildQuoteUrl(stock: StockId): URL {
@@ -190,35 +332,115 @@ function buildHistoryUrl(stock: StockId, days: number): URL {
   return url;
 }
 
-function buildFinancialUrl(stock: StockId): URL {
-  assertStock(stock);
-  const url = new URL(
-    `https://${FINANCIAL_HOST}/api/data/v1/get`,
-  );
+function buildFinancialUrl(
+  stock: StockId,
+  reportName: string,
+  style: string,
+): URL {
+  const url = new URL(FINANCIAL_ENDPOINT);
   url.search = new URLSearchParams({
-    reportName: "RPT_F10_FINANCE_MAINFINADATA",
-    columns: "ALL",
-    filter: `(SECURITY_CODE="${stock.code}")`,
-    pageNumber: "1",
-    pageSize: "20",
-    sortColumns: "REPORT_DATE",
-    sortTypes: "-1",
+    type: reportName,
+    sty: style,
+    filter: `(SECUCODE="${stock.canonical}")`,
+    p: "1",
+    ps: "20",
+    sr: "-1",
+    st: "REPORT_DATE",
+    source: "HSF10",
+    client: "PC",
+    v: "05767841728614413",
   }).toString();
   return url;
 }
 
 function eastmoneySecurityId(stock: StockId): string {
-  assertStock(stock);
   return `${stock.exchange === "SH" ? "1" : "0"}.${stock.code}`;
 }
 
-function assertStock(stock: StockId): void {
+async function fetchFinancialStatement(
+  url: URL,
+): Promise<EastmoneyEnvelope<FinancialStatement>> {
+  return safeFetchJson<EastmoneyEnvelope<FinancialStatement>>(url, {
+    allowedHosts: [FINANCIAL_HOST],
+    maxResponseBytes: 5 * 1024 * 1024,
+    request: {
+      headers: {
+        referer: "https://quote.eastmoney.com/",
+      },
+    },
+  });
+}
+
+function validatedStatementRows(
+  response: EastmoneyEnvelope<FinancialStatement>,
+  statementName: string,
+  requiredFields: readonly string[],
+  stock: StockId,
+): FinancialStatement[] {
+  const rows = response.result?.data;
   if (
-    !/^\d{6}$/.test(stock.code) ||
-    (stock.exchange !== "SH" && stock.exchange !== "SZ")
+    response.success === false ||
+    !Array.isArray(rows) ||
+    rows.length === 0
   ) {
-    throw new Error("invalid stock identifier");
+    throw new Error(
+      `Eastmoney ${statementName} source returned no records`,
+    );
   }
+  const matchingRows = rows.filter(
+    (row) =>
+      isRecord(row) &&
+      row.SECUCODE === stock.canonical &&
+      row.SECURITY_CODE === stock.code,
+  );
+  if (matchingRows.length === 0) {
+    throw new Error(
+      `Eastmoney ${statementName} source returned no matching stock records`,
+    );
+  }
+  for (const row of matchingRows) {
+    if (!requiredFields.every((field) => Object.hasOwn(row, field))) {
+      throw new Error(
+        `Eastmoney ${statementName} source contract changed`,
+      );
+    }
+    statementKey(row);
+  }
+  return matchingRows;
+}
+
+function indexStatements(
+  rows: FinancialStatement[],
+): Map<string, FinancialStatement> {
+  return new Map(rows.map((row) => [statementKey(row), row]));
+}
+
+function statementKey(row: FinancialStatement): string {
+  const reportDate = normalizeDate(row.REPORT_DATE);
+  const reportType = toText(row.REPORT_TYPE);
+  if (!reportDate || !reportType) {
+    throw new Error(
+      "Eastmoney financial source contract has invalid report period",
+    );
+  }
+  return `${reportDate}:${reportType}`;
+}
+
+function requireFinite(
+  row: FinancialStatement,
+  field: string,
+): number {
+  const value = toFiniteNumber(row[field]);
+  if (value === null) {
+    throw new Error(
+      `Eastmoney financial source has unavailable required field: ${field}`,
+    );
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is FinancialStatement {
+  return typeof value === "object" && value !== null;
 }
 
 function validateDays(days: number): number {
@@ -242,19 +464,6 @@ function toFiniteNumber(value: unknown): number | null {
   }
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function pickFinite(
-  row: Record<string, unknown>,
-  ...keys: string[]
-): number | null {
-  for (const key of keys) {
-    const value = toFiniteNumber(row[key]);
-    if (value !== null) {
-      return value;
-    }
-  }
-  return null;
 }
 
 function toText(value: unknown): string | null {

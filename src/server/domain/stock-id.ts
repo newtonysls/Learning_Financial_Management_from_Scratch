@@ -28,6 +28,23 @@ export function normalizeStockId(raw: string): StockId {
   return { code, exchange, canonical: `${code}.${exchange}` };
 }
 
+export function assertStockId(stock: StockId): StockId {
+  const normalized = normalizeStockId(
+    `${stock.code}.${stock.exchange}`,
+  );
+  const normalizedCanonical = normalizeStockId(stock.canonical);
+  if (
+    stock.code !== normalized.code ||
+    stock.exchange !== normalized.exchange ||
+    stock.canonical !== normalized.canonical ||
+    normalizedCanonical.code !== normalized.code ||
+    normalizedCanonical.exchange !== normalized.exchange
+  ) {
+    throw new Error("股票标识字段不一致");
+  }
+  return normalized;
+}
+
 function inferExchange(code: string): StockExchange | null {
   if (/^(?:600|601|603|605|688)/.test(code)) {
     return "SH";

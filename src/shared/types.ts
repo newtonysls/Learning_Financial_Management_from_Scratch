@@ -9,6 +9,7 @@ export interface StockId {
 export interface PricePoint {
   date: string;
   close: number;
+  evidence?: EvidenceRecord;
 }
 
 export interface DrawdownResult {
@@ -21,6 +22,10 @@ export interface DrawdownResult {
 
 export interface FinancialSnapshot {
   reportDate?: string;
+  reportType?: string;
+  periodScope?: "annual" | "year-to-date";
+  annualized?: false;
+  currency?: string;
   totalAssets: number;
   totalLiabilities: number;
   currentAssets: number;
@@ -33,8 +38,10 @@ export interface FinancialSnapshot {
   equity: number;
   interestExpense: number;
   earningsBeforeInterestAndTax: number;
+  interestExpenseBasis?: "FE_INTEREST_EXPENSE";
   sourceUrl?: string;
   retrievedAt?: string;
+  evidence?: EvidenceRecord;
 }
 
 export interface FinancialRatios {
@@ -57,6 +64,7 @@ export interface CompanyProfile {
   marketCapitalization: number | null;
   sourceUrl: string;
   retrievedAt: string;
+  evidence?: EvidenceRecord;
 }
 
 export type SourceGrade = "A" | "B" | "C" | "D";
@@ -74,10 +82,12 @@ export interface EvidenceRecord {
   title: string;
   contentHash: string;
   sourceUrl?: string;
+  sourceUrls?: string[];
   publishedAt?: string;
   retrievedAt: string;
   category?: string;
   content?: string;
+  contentType?: "text/plain";
   locator?: EvidenceLocator;
 }
 
@@ -92,11 +102,30 @@ export interface ResearchFailure {
   path?: string;
 }
 
+export interface DrawdownAnalysis {
+  result: DrawdownResult;
+  evidenceIds: string[];
+  retrievedAt: string;
+  periodStart: string;
+  periodEnd: string;
+  coverage: "full";
+}
+
 export interface PeriodDrawdowns {
-  weekly: DrawdownResult | null;
-  monthly: DrawdownResult | null;
-  quarterly: DrawdownResult | null;
-  yearly: DrawdownResult | null;
+  weekly: DrawdownAnalysis | null;
+  monthly: DrawdownAnalysis | null;
+  quarterly: DrawdownAnalysis | null;
+  yearly: DrawdownAnalysis | null;
+}
+
+export interface RatioAnalysis {
+  values: FinancialRatios;
+  evidenceIds: string[];
+  retrievedAt: string;
+  reportDate: string;
+  reportType: string;
+  periodScope: "annual" | "year-to-date";
+  annualized: false;
 }
 
 export interface ResearchSources {
@@ -113,6 +142,7 @@ export interface BuildResearchInput {
   stock: StockId;
   historyDays?: number;
   localDocumentPaths?: string[];
+  knowledgeBaseRoot?: string;
   sources?: ResearchSources;
   now?: () => string;
 }
@@ -124,7 +154,7 @@ export interface ResearchPackage {
   financials: FinancialSnapshot[];
   announcements: EvidenceRecord[];
   evidence: EvidenceRecord[];
-  ratios: FinancialRatios | null;
+  ratios: RatioAnalysis | null;
   drawdowns: PeriodDrawdowns;
   failures: ResearchFailure[];
   generatedAt: string;

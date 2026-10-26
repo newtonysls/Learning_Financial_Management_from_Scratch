@@ -2,12 +2,14 @@ import type {
   EvidenceRecord,
   StockId,
 } from "../../shared/types";
+import { assertStockId } from "../domain/stock-id";
 import { hashContent } from "../evidence/evidence-store";
 import { safeFetchJson } from "./http";
 
 const QUERY_HOST = "www.cninfo.com.cn";
 const DOCUMENT_HOST = "static.cninfo.com.cn";
 const QUERY_URL = `https://${QUERY_HOST}/new/hisAnnouncement/query`;
+const ORGANIZATION_URL = `https://${QUERY_HOST}/new/information/topSearch/query`;
 
 interface CninfoResponse {
   announcements?: unknown;
@@ -18,20 +20,33 @@ interface CninfoAnnouncement {
   announcementId?: unknown;
   announcementTitle?: unknown;
   announcementTime?: unknown;
+  announcementType?: unknown;
   announcementTypeName?: unknown;
+  columnId?: unknown;
+  orgId?: unknown;
+  pageColumn?: unknown;
+  secCode?: unknown;
+}
+
+interface CninfoOrganization {
+  category?: unknown;
+  code?: unknown;
+  orgId?: unknown;
+  type?: unknown;
 }
 
 export async function fetchAnnouncements(
   stock: StockId,
 ): Promise<EvidenceRecord[]> {
-  assertStock(stock);
+  const normalizedStock = assertStockId(stock);
+  const organization = await fetchOrganization(normalizedStock);
   const form = new URLSearchParams({
     pageNum: "1",
     pageSize: "30",
-    column: stock.exchange === "SH" ? "sse" : "szse",
+    column: normalizedStock.exchange === "SH" ? "sse" : "szse",
     tabName: "fulltext",
     plate: "",
-    stock: stock.code,
+    stock: `${normalizedStock.code},${organization.orgId}`,
     searchkey: "",
     secid: "",
     category: "",
@@ -58,7 +73,19 @@ export async function fetchAnnouncements(
   }
 
   const retrievedAt = new Date().toISOString();
-  return response.announcements.flatMap((raw): EvidenceRecord[] => {
+  const matchingAnnouncements = response.announcements.filter((raw) => {
+    if (!isRecord(raw)) {
+      return false;
+    }
+    const secCode = toNonEmptyText(raw.secCode);
+    const orgId = toNonEmptyText(raw.orgId);
+    return (
+      secCode === normalizedStock.code &&
+      (orgId === null || orgId === organization.orgId)
+    );
+  });
+  const records = matchingAnnouncements.flatMap(
+    (raw): EvidenceRecord[] => {
     if (!isRecord(raw)) {
       return [];
     }
@@ -87,10 +114,61 @@ export async function fetchAnnouncements(
         retrievedAt,
         category:
           toNonEmptyText(announcement.announcementTypeName) ??
+          toNonEmptyText(announcement.announcementType) ??
+          toNonEmptyText(announcement.columnId) ??
+          toNonEmptyText(announcement.pageColumn) ??
           undefined,
       },
     ];
+    },
+  );
+  if (matchingAnnouncements.length > 0 && records.length === 0) {
+    throw new Error("CNInfo announcement source contract changed");
+  }
+  return records;
+}
+
+async function fetchOrganization(
+  stock: StockId,
+): Promise<{ orgId: string }> {
+  const url = new URL(ORGANIZATION_URL);
+  url.search = new URLSearchParams({
+    keyWord: stock.code,
+    maxNum: "10",
+  }).toString();
+  const response = await safeFetchJson<unknown>(url, {
+    allowedHosts: [QUERY_HOST],
+    request: {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        origin: "https://www.cninfo.com.cn",
+        referer: "https://www.cninfo.com.cn/",
+      },
+    },
   });
+  if (!Array.isArray(response)) {
+    throw new Error("CNInfo organization source contract changed");
+  }
+  const organization = response.find((item) => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    const type = toNonEmptyText(item.type);
+    return (
+      toNonEmptyText(item.code) === stock.code &&
+      toNonEmptyText(item.category) === "A股" &&
+      (type === null ||
+        (stock.exchange === "SH"
+          ? type.startsWith("sh")
+          : !type.startsWith("sh")))
+    );
+  }) as CninfoOrganization | undefined;
+  const orgId = toNonEmptyText(organization?.orgId);
+  if (!orgId) {
+    throw new Error("CNInfo organization lookup found no matching A-share");
+  }
+  return { orgId };
 }
 
 function normalizeDocumentUrl(value: unknown): string | null {
@@ -148,11 +226,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function assertStock(stock: StockId): void {
-  if (
-    !/^\d{6}$/.test(stock.code) ||
-    (stock.exchange !== "SH" && stock.exchange !== "SZ")
-  ) {
-    throw new Error("invalid stock identifier");
-  }
-}

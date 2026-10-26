@@ -5,6 +5,7 @@ const MAX_RETRIES = 2;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const ABSOLUTE_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+const MAX_RETRY_DELAY_MS = 10_000;
 
 export interface SafeFetchOptions {
   allowedHosts?: string[];
@@ -12,6 +13,7 @@ export interface SafeFetchOptions {
   maxResponseBytes?: number;
   maxRetries?: number;
   request?: RequestInit;
+  sleep?: (milliseconds: number) => Promise<void>;
   timeoutMs?: number;
 }
 
@@ -40,6 +42,7 @@ export async function safeFetchJson<T = unknown>(
     Math.max(0, Math.trunc(options.maxRetries ?? MAX_RETRIES)),
   );
   const request = validateRequest(options.request);
+  const sleep = options.sleep ?? defaultSleep;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -70,6 +73,7 @@ export async function safeFetchJson<T = unknown>(
         const error = new HttpStatusError(response.status);
         if (attempt < maxRetries && isRetryableStatus(response.status)) {
           lastError = error;
+          await sleep(retryDelay(response, attempt));
           continue;
         }
         throw error;
@@ -89,6 +93,7 @@ export async function safeFetchJson<T = unknown>(
       ) {
         throw normalizedError;
       }
+      await sleep(exponentialDelay(attempt));
     } finally {
       clearTimeout(timeout);
     }
@@ -242,6 +247,32 @@ function boundedPositiveInteger(
 
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
+}
+
+function retryDelay(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1_000, MAX_RETRY_DELAY_MS);
+    }
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      return Math.min(
+        Math.max(0, retryAt - Date.now()),
+        MAX_RETRY_DELAY_MS,
+      );
+    }
+  }
+  return exponentialDelay(attempt);
+}
+
+function exponentialDelay(attempt: number): number {
+  return Math.min(250 * 2 ** attempt, MAX_RETRY_DELAY_MS);
+}
+
+function defaultSleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isPrivateDestination(hostname: string): boolean {
