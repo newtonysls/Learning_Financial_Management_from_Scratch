@@ -116,7 +116,7 @@ async function parsePdf(
     }
     return records;
   } finally {
-    await document.destroy();
+    await loadingTask.destroy();
   }
 }
 
