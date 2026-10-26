@@ -77,7 +77,6 @@ async function parsePdf(
   );
   const loadingTask = getDocument({
     data: new Uint8Array(bytes),
-    isEvalSupported: false,
     useSystemFonts: true,
   });
   const document = await loadingTask.promise;

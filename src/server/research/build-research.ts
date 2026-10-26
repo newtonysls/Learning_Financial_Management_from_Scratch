@@ -134,7 +134,7 @@ function calculatePeriodDrawdowns(
         Number.isFinite(point.close) &&
         point.close > 0,
     )
-    .toSorted((left, right) => left.date.localeCompare(right.date));
+    .sort((left, right) => left.date.localeCompare(right.date));
   const latest = validPoints.at(-1);
   if (!latest) {
     return emptyDrawdowns();
