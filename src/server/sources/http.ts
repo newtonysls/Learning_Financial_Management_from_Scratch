@@ -61,7 +61,9 @@ export async function safeFetchJson<T = unknown>(
       });
       if (response.status >= 300 && response.status < 400) {
         await response.body?.cancel();
-        throw new Error("redirect responses are not allowed");
+        throw new ResponseValidationError(
+          "redirect responses are not allowed",
+        );
       }
       if (!response.ok) {
         await response.body?.cancel();
@@ -82,6 +84,7 @@ export async function safeFetchJson<T = unknown>(
       if (
         attempt >= maxRetries ||
         normalizedError instanceof HttpStatusError ||
+        normalizedError instanceof ResponseValidationError ||
         request.signal?.aborted
       ) {
         throw normalizedError;
@@ -172,11 +175,13 @@ async function parseBoundedJson<T>(
       Number(contentLength) > maxBytes)
   ) {
     await response.body?.cancel();
-    throw new Error("response body exceeds the allowed size");
+    throw new ResponseValidationError(
+      "response body exceeds the allowed size",
+    );
   }
 
   if (!response.body) {
-    throw new Error("response body is empty");
+    throw new ResponseValidationError("response body is empty");
   }
 
   const reader = response.body.getReader();
@@ -190,7 +195,9 @@ async function parseBoundedJson<T>(
     totalBytes += value.byteLength;
     if (totalBytes > maxBytes) {
       await reader.cancel();
-      throw new Error("response body exceeds the allowed size");
+      throw new ResponseValidationError(
+        "response body exceeds the allowed size",
+      );
     }
     chunks.push(value);
   }
@@ -206,12 +213,16 @@ async function parseBoundedJson<T>(
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new Error("response body is not valid UTF-8");
+    throw new ResponseValidationError(
+      "response body is not valid UTF-8",
+    );
   }
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new Error("response body is not valid JSON");
+    throw new ResponseValidationError(
+      "response body is not valid JSON",
+    );
   }
 }
 
@@ -296,3 +307,5 @@ class HttpStatusError extends Error {
     super(`source request failed with HTTP ${status}`);
   }
 }
+
+class ResponseValidationError extends Error {}

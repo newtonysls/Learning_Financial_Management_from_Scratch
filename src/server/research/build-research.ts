@@ -174,10 +174,29 @@ function shiftUtcDate(
   months: number,
   days: number,
 ): Date {
-  const shifted = new Date(date.getTime());
-  shifted.setUTCMonth(shifted.getUTCMonth() + months);
+  const shifted =
+    months === 0
+      ? new Date(date.getTime())
+      : clampedMonthShift(date, months);
   shifted.setUTCDate(shifted.getUTCDate() + days);
   return shifted;
+}
+
+function clampedMonthShift(date: Date, months: number): Date {
+  const targetMonthStart = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1),
+  );
+  const lastTargetDay = new Date(
+    Date.UTC(
+      targetMonthStart.getUTCFullYear(),
+      targetMonthStart.getUTCMonth() + 1,
+      0,
+    ),
+  ).getUTCDate();
+  targetMonthStart.setUTCDate(
+    Math.min(date.getUTCDate(), lastTargetDay),
+  );
+  return targetMonthStart;
 }
 
 function parseDate(value: string): Date | null {
