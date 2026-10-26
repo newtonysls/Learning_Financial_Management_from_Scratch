@@ -1,7 +1,11 @@
 import type {
   BuildResearchInput,
+  CompanyProfile,
+  EvidenceRecord,
+  FinancialSnapshot,
   PeriodDrawdowns,
   PricePoint,
+  RatioAnalysis,
   ResearchFailure,
   ResearchPackage,
   ResearchSources,
@@ -11,7 +15,11 @@ import {
   calculateMaxDrawdown,
 } from "../analysis/metrics";
 import { parseLocalDocument } from "../documents/parser";
-import { EvidenceStore } from "../evidence/evidence-store";
+import { assertStockId } from "../domain/stock-id";
+import {
+  EvidenceStore,
+  hashContent,
+} from "../evidence/evidence-store";
 import { fetchAnnouncements } from "../sources/cninfo";
 import {
   fetchCompanyProfile,
@@ -31,6 +39,7 @@ const defaultSources: ResearchSources = {
 export async function buildResearchPackage(
   input: BuildResearchInput,
 ): Promise<ResearchPackage> {
+  const stock = assertStockId(input.stock);
   const generatedAt = (input.now ?? (() => new Date().toISOString()))();
   const sources = input.sources ?? defaultSources;
   const historyDays = validateHistoryDays(
@@ -38,26 +47,26 @@ export async function buildResearchPackage(
   );
 
   const sourceResults = await Promise.allSettled([
-    sources.fetchCompanyProfile(input.stock),
-    sources.fetchPriceHistory(input.stock, historyDays),
-    sources.fetchFinancials(input.stock),
-    sources.fetchAnnouncements(input.stock),
+    invokeSource(() => sources.fetchCompanyProfile(stock)),
+    invokeSource(() => sources.fetchPriceHistory(stock, historyDays)),
+    invokeSource(() => sources.fetchFinancials(stock)),
+    invokeSource(() => sources.fetchAnnouncements(stock)),
   ] as const);
 
   const failures: ResearchFailure[] = [];
-  const profile = settledValue(
+  const rawProfile = settledValue(
     sourceResults[0],
     "companyProfile",
     null,
     failures,
   );
-  const priceHistory = settledValue(
+  const rawPriceHistory = settledValue(
     sourceResults[1],
     "priceHistory",
     [],
     failures,
   );
-  const financials = settledValue(
+  const rawFinancials = settledValue(
     sourceResults[2],
     "financials",
     [],
@@ -69,10 +78,33 @@ export async function buildResearchPackage(
     [],
     failures,
   );
+  const profile = rawProfile
+    ? ensureProfileEvidence(rawProfile, generatedAt)
+    : null;
+  const priceHistory = ensurePriceEvidence(
+    rawPriceHistory,
+    stock.canonical,
+    generatedAt,
+  );
+  const financials = rawFinancials
+    .map((snapshot) =>
+      ensureFinancialEvidence(
+        snapshot,
+        stock.canonical,
+        generatedAt,
+      ),
+    )
+    .sort((left, right) =>
+      (right.reportDate ?? "").localeCompare(left.reportDate ?? ""),
+    );
 
   const localResults = await Promise.allSettled(
     (input.localDocumentPaths ?? []).map((filePath) =>
-      parseLocalDocument(filePath),
+      Promise.resolve().then(() =>
+        parseLocalDocument(filePath, {
+          knowledgeBaseRoot: input.knowledgeBaseRoot,
+        }),
+      ),
     ),
   );
   const localEvidence = localResults.flatMap((result, index) => {
@@ -88,20 +120,29 @@ export async function buildResearchPackage(
   });
 
   const evidenceStore = new EvidenceStore(() => generatedAt);
+  if (profile?.evidence) {
+    evidenceStore.add(profile.evidence);
+  }
+  const priceEvidence = priceHistory[0]?.evidence;
+  if (priceEvidence) {
+    evidenceStore.add(priceEvidence);
+  }
+  evidenceStore.addMany(
+    financials.flatMap((snapshot) =>
+      snapshot.evidence ? [snapshot.evidence] : [],
+    ),
+  );
   evidenceStore.addMany(announcements);
   evidenceStore.addMany(localEvidence);
 
   return {
-    stock: { ...input.stock },
+    stock: { ...stock },
     profile,
     priceHistory,
     financials,
     announcements,
     evidence: evidenceStore.list(),
-    ratios:
-      financials.length > 0
-        ? calculateFinancialRatios(financials[0]!)
-        : null,
+    ratios: buildRatioAnalysis(financials[0]),
     drawdowns: calculatePeriodDrawdowns(priceHistory),
     failures,
     generatedAt,
@@ -122,6 +163,113 @@ function settledValue<T>(
     message: errorMessage(result.reason),
   });
   return fallback;
+}
+
+function invokeSource<T>(operation: () => Promise<T>): Promise<T> {
+  return Promise.resolve().then(operation);
+}
+
+function ensureProfileEvidence(
+  profile: CompanyProfile,
+  retrievedAt: string,
+): CompanyProfile {
+  if (profile.evidence) {
+    return profile;
+  }
+  const content = JSON.stringify({
+    stock: profile.stock,
+    name: profile.name,
+    industry: profile.industry,
+    latestPrice: profile.latestPrice,
+    marketCapitalization: profile.marketCapitalization,
+  });
+  return {
+    ...profile,
+    evidence: {
+      id: `research:profile:${profile.stock.canonical}`,
+      sourceGrade: "C",
+      title: `${profile.stock.canonical} 公司概况`,
+      content,
+      contentType: "text/plain",
+      contentHash: hashContent(content),
+      sourceUrl: profile.sourceUrl,
+      retrievedAt: profile.retrievedAt || retrievedAt,
+    },
+  };
+}
+
+function ensurePriceEvidence(
+  points: PricePoint[],
+  canonical: string,
+  retrievedAt: string,
+): PricePoint[] {
+  if (points.length === 0) {
+    return [];
+  }
+  const existingEvidence = points.find(
+    (point) => point.evidence,
+  )?.evidence;
+  const content = JSON.stringify(
+    points.map(({ date, close }) => ({ date, close })),
+  );
+  const evidence: EvidenceRecord = existingEvidence ?? {
+    id: `research:prices:${canonical}`,
+    sourceGrade: "C",
+    title: `${canonical} 历史行情`,
+    content,
+    contentType: "text/plain",
+    contentHash: hashContent(content),
+    retrievedAt,
+  };
+  return points.map((point) => ({ ...point, evidence }));
+}
+
+function ensureFinancialEvidence(
+  snapshot: FinancialSnapshot,
+  canonical: string,
+  retrievedAt: string,
+): FinancialSnapshot {
+  if (snapshot.evidence) {
+    return snapshot;
+  }
+  const content = JSON.stringify(snapshot);
+  return {
+    ...snapshot,
+    evidence: {
+      id: `research:financial:${canonical}:${snapshot.reportDate ?? "unknown"}`,
+      sourceGrade: "C",
+      title: `${canonical} ${snapshot.reportDate ?? "未知报告期"} 财务报表`,
+      content,
+      contentType: "text/plain",
+      contentHash: hashContent(content),
+      sourceUrl: snapshot.sourceUrl,
+      retrievedAt: snapshot.retrievedAt ?? retrievedAt,
+    },
+  };
+}
+
+function buildRatioAnalysis(
+  snapshot: FinancialSnapshot | undefined,
+): RatioAnalysis | null {
+  if (
+    !snapshot ||
+    !snapshot.reportDate ||
+    !snapshot.reportType ||
+    !snapshot.periodScope ||
+    !snapshot.evidence
+  ) {
+    return null;
+  }
+  return {
+    values: calculateFinancialRatios(snapshot),
+    evidenceIds: [snapshot.evidence.id],
+    retrievedAt:
+      snapshot.retrievedAt ?? snapshot.evidence.retrievedAt,
+    reportDate: snapshot.reportDate,
+    reportType: snapshot.reportType,
+    periodScope: snapshot.periodScope,
+    annualized: false,
+  };
 }
 
 function calculatePeriodDrawdowns(
@@ -158,15 +306,40 @@ function calculatePeriodDrawdowns(
 function drawdownSince(
   points: PricePoint[],
   cutoff: Date,
-): ReturnType<typeof calculateMaxDrawdown> | null {
+): PeriodDrawdowns["weekly"] {
   const cutoffTimestamp = cutoff.getTime();
+  const earliestDate = parseDate(points[0]?.date ?? "");
+  if (!earliestDate || earliestDate.getTime() > cutoffTimestamp) {
+    return null;
+  }
   const periodPoints = points.filter((point) => {
     const date = parseDate(point.date);
     return date !== null && date.getTime() >= cutoffTimestamp;
   });
-  return periodPoints.length > 0
-    ? calculateMaxDrawdown(periodPoints)
-    : null;
+  const latest = periodPoints.at(-1);
+  if (!latest) {
+    return null;
+  }
+  const evidence = periodPoints
+    .map((point) => point.evidence)
+    .find((record) => record !== undefined);
+  if (!evidence) {
+    return null;
+  }
+  return {
+    result: calculateMaxDrawdown(periodPoints),
+    evidenceIds: [
+      ...new Set(
+        periodPoints.flatMap((point) =>
+          point.evidence ? [point.evidence.id] : [],
+        ),
+      ),
+    ],
+    retrievedAt: evidence.retrievedAt,
+    periodStart: cutoff.toISOString().slice(0, 10),
+    periodEnd: latest.date,
+    coverage: "full",
+  };
 }
 
 function shiftUtcDate(
