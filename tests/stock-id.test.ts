@@ -17,21 +17,37 @@ describe("normalizeStockId", () => {
   });
 
   test("accepts the supported Shanghai and Shenzhen A-share segments", () => {
-    for (const code of ["600000", "601000", "603000", "605000", "688000", "689000"]) {
+    for (const code of ["600000", "601000", "603000", "605000", "688000"]) {
       expect(normalizeStockId(code).exchange).toBe("SH");
     }
 
-    for (const code of ["000001", "001000", "002000", "003000", "300000", "301000"]) {
+    for (const code of [
+      "000001",
+      "001000",
+      "002000",
+      "003000",
+      "300000",
+      "301000",
+    ]) {
       expect(normalizeStockId(code).exchange).toBe("SZ");
     }
   });
 
-  test("rejects ETF and B-share identifiers", () => {
-    for (const code of ["510300", "900901", "200002"]) {
+  test("rejects ETF, B-share, and CDR identifiers", () => {
+    for (const code of ["510300", "900901", "200002", "689009"]) {
       expect(() => normalizeStockId(code)).toThrow(
         "请输入有效的 6 位沪深 A 股代码",
       );
     }
+  });
+
+  test("rejects an exchange prefix that conflicts with the code", () => {
+    expect(() => normalizeStockId("SH000001")).toThrow(
+      "股票代码与交易所不匹配",
+    );
+    expect(() => normalizeStockId("SZ600519")).toThrow(
+      "股票代码与交易所不匹配",
+    );
   });
 
   test("rejects malformed and mismatched identifiers", () => {
