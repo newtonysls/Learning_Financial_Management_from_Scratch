@@ -186,4 +186,146 @@ Build failed with 1 error:
 ## Concerns
 
 - 当前仓库沿用任务 1 的 Vite 客户端构建脚本，但尚无 `index.html`，因此 `npm run build` 在进入本任务服务端代码打包前即失败；本任务要求的聚焦/全量测试、类型检查和依赖审计均通过。未在任务 2 范围内伪造客户端入口。
-- 公开数据接口的上游字段可能变化。适配器遇到缺失或异常字段时会返回空结果或记录来源失败，不会用零值或推测值替代；生产运行应关注这些降级记录。
+- 公开数据接口的上游字段可能变化。适配器遇到缺失、异常字段或不可拼接报告期时会抛出来源错误，由研究编排记录失败，不会用零值、空成功或推测值替代；生产运行应关注这些降级记录。
+
+---
+
+## 审查修复：真实来源契约、证据链与本地访问控制
+
+### 状态
+
+DONE
+
+### 修改摘要
+
+- 使用线上公开接口核验并提交脱敏真实结构快照：
+  - 东方财富 `RPT_F10_FINANCE_GBALANCE`、`RPT_F10_FINANCE_GINCOME`、`RPT_F10_FINANCE_GCASHFLOW`。
+  - 巨潮资讯 `topSearch/query` 组织查询及 `hisAnnouncement/query` 公告查询。
+- 财务适配器改为按 `SECUCODE + REPORT_DATE + REPORT_TYPE` 拼接资产负债表、利润表和现金流量表；分别使用总资产、总负债、流动资产、存货、流动负债、归母权益、营业总收入、营业成本、归母净利润、经营现金流和财务费用利息字段。EBIT 口径明确为 `TOTAL_PROFIT + FE_INTEREST_EXPENSE`。
+- 财务响应缺失记录、字段契约变化、股票不匹配、必需字段不可用或报告期无法拼接时抛出来源错误，不再静默返回空成功；快照按 `reportDate` 降序。
+- 巨潮适配器先用严格股票代码获取 `orgId`，再以 `code,orgId` 查询；结果同时过滤 `secCode` 并在存在时核对 `orgId`。分类依次使用 `announcementTypeName`、`announcementType`、`columnId`、`pageColumn`。
+- 新增 `assertStockId`，所有生产适配器及研究编排复用任务 1 的 A 股号段、交易所和 canonical 一致性校验。
+- 公司概况、行情和每个财务报告期生成 `EvidenceRecord`；研究包的比率与回撤包含证据 ID、检索时间、报告期/窗口、口径及是否年化。中报、季报标记为累计期且 `annualized: false`。
+- 回撤仅在历史序列覆盖完整周/月/季/年起点时返回结果，否则返回 `null`。
+- 同步来源异常通过延迟调用纳入 `Promise.allSettled`；本地文档继续并发处理。
+- 本地解析必须配置知识库根目录，使用 `lstat + realpath + O_NOFOLLOW`，拒绝根目录外路径及任意路径组件中的符号链接。
+- XLSX 在交给工作簿解析器前以流式解压计算实际输出字节，拒绝伪造 ZIP 元数据的压缩炸弹；`fflate` 调整为运行时依赖。
+- PDF 显式传入禁用 eval、字体和 WASM 的安全选项，并以最大 12 秒超时销毁加载任务。
+- HTML 实体使用单次映射解码，提取结果标记为 `text/plain`。
+- HTTP 对 429/503 和网络错误实施 250ms 起始的指数退避，尊重并限制 `Retry-After`，保留原 HTTPS、443、主机白名单、私网拒绝、重定向拒绝及响应大小限制。
+
+### Commits
+
+- `fd5b504 test: capture real source contracts and review regressions`
+- `8101ae7 fix: use verified public source contracts`
+- `3920f2e test: align assertions with source timestamp semantics`
+- `736b283 fix: confine and bound local document parsing`
+- `71e1ef3 fix: govern research evidence and period coverage`
+- `6e8c7b9 style: normalize source file ending`
+
+以上提交均已推送至 `origin/cursor/task-2-research-pipeline-9363`。
+
+### 审查回归 RED
+
+命令：
+
+```bash
+npm test -- --run tests/evidence.test.ts tests/research.test.ts tests/stock-id.test.ts
+```
+
+真实输出摘要（exit code 1）：
+
+```text
+RUN  v5.0.5 /workspace
+
+Test Files  3 failed (3)
+     Tests  16 failed | 14 passed (30)
+
+主要失败：
+- expected financial snapshots length 4, received 0
+- expected changed financial contract to reject, promise resolved []
+- expected CNInfo records length 3, received 5
+- expected Retry-After delays [[2000], [500]], received []
+- synchronous quote failure escaped buildResearchPackage
+- incomplete history returned drawdowns instead of null
+- invalid ETF StockId resolved instead of rejecting
+- assertStockId is not a function
+```
+
+### 最终任务 2 聚焦测试
+
+命令：
+
+```bash
+npm test -- --run tests/evidence.test.ts tests/research.test.ts
+```
+
+真实输出（exit code 0）：
+
+```text
+> a-stock-fundamental-agent@0.1.0 test
+> vitest --run tests/evidence.test.ts tests/research.test.ts
+
+ RUN  v5.0.5 /workspace
+
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+   Start at  15:08:03
+   Duration  2.10s (tests 88%, import 7%, transform 4%)
+```
+
+### 最终全量测试
+
+命令：
+
+```bash
+npm test -- --run
+```
+
+真实输出（exit code 0）：
+
+```text
+> a-stock-fundamental-agent@0.1.0 test
+> vitest --run
+
+ RUN  v5.0.5 /workspace
+
+ Test Files  4 passed (4)
+      Tests  35 passed (35)
+   Start at  15:08:03
+   Duration  2.01s (tests 91%, import 7%, transform 2%, worker 1%)
+```
+
+### 最终 TypeScript 自检
+
+命令：
+
+```bash
+npm run typecheck
+```
+
+真实输出（exit code 0）：
+
+```text
+> a-stock-fundamental-agent@0.1.0 typecheck
+> tsc --noEmit
+```
+
+### 最终依赖审计
+
+命令：
+
+```bash
+npm audit --audit-level=high
+```
+
+真实输出（exit code 0）：
+
+```text
+found 0 vulnerabilities
+```
+
+### 审查修复 Concerns
+
+- 线上数据源仍可能调整公开字段或临时限流；当前行为是带退避重试后抛出明确来源错误，并由研究包记录，不会把契约变化伪装成空成功。
+- 仓库原有 `npm run build` 仍因缺少客户端 `index.html` 失败；该问题与任务 2 服务端实现无关，聚焦/全量测试、类型检查与依赖审计均通过。
