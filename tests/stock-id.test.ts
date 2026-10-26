@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { normalizeStockId } from "../src/server/domain/stock-id";
+import {
+  assertStockId,
+  normalizeStockId,
+} from "../src/server/domain/stock-id";
 
 describe("normalizeStockId", () => {
   test("normalizes Shanghai and Shenzhen identifiers", () => {
@@ -57,5 +60,33 @@ describe("normalizeStockId", () => {
     expect(() => normalizeStockId("600519.SZ")).toThrow(
       "股票代码与交易所不匹配",
     );
+  });
+
+  test("validates every field of an existing StockId", () => {
+    expect(
+      assertStockId({
+        code: "600519",
+        exchange: "SH",
+        canonical: "600519.SH",
+      }),
+    ).toEqual({
+      code: "600519",
+      exchange: "SH",
+      canonical: "600519.SH",
+    });
+    expect(() =>
+      assertStockId({
+        code: "510300",
+        exchange: "SH",
+        canonical: "510300.SH",
+      }),
+    ).toThrow("6 位沪深 A 股代码");
+    expect(() =>
+      assertStockId({
+        code: "600519",
+        exchange: "SH",
+        canonical: "000001.SZ",
+      }),
+    ).toThrow("股票标识字段不一致");
   });
 });

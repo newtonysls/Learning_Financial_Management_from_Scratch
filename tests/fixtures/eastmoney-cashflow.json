@@ -1,0 +1,48 @@
+{
+  "version": "7cd07193ef0bffb5cc13b695cd0be717",
+  "result": {
+    "pages": 25,
+    "data": [
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2026-06-30 00:00:00",
+        "REPORT_TYPE": "中报",
+        "REPORT_DATE_NAME": "2026中报",
+        "CURRENCY": "CNY",
+        "NETCASH_OPERATE": 70690750119.06
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2026-03-31 00:00:00",
+        "REPORT_TYPE": "一季报",
+        "REPORT_DATE_NAME": "2026一季报",
+        "CURRENCY": "CNY",
+        "NETCASH_OPERATE": 26909891269.13
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2025-12-31 00:00:00",
+        "REPORT_TYPE": "年报",
+        "REPORT_DATE_NAME": "2025年报",
+        "CURRENCY": "CNY",
+        "NETCASH_OPERATE": 61522204989.35
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2025-09-30 00:00:00",
+        "REPORT_TYPE": "三季报",
+        "REPORT_DATE_NAME": "2025三季报",
+        "CURRENCY": "CNY",
+        "NETCASH_OPERATE": 38196802155.27
+      }
+    ],
+    "count": 99
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+}

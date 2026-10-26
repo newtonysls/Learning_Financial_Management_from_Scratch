@@ -1,0 +1,64 @@
+{
+  "version": "f0493ee6ec065df274ea819eabb163a1",
+  "result": {
+    "pages": 26,
+    "data": [
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2026-06-30 00:00:00",
+        "REPORT_TYPE": "中报",
+        "REPORT_DATE_NAME": "2026中报",
+        "CURRENCY": "CNY",
+        "TOTAL_OPERATE_INCOME": 92278072083.21,
+        "OPERATE_COST": 9473762565.88,
+        "PARENT_NETPROFIT": 44516880421.86,
+        "FE_INTEREST_EXPENSE": 21034591.16,
+        "TOTAL_PROFIT": 61438419177.29
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2026-03-31 00:00:00",
+        "REPORT_TYPE": "一季报",
+        "REPORT_DATE_NAME": "2026一季报",
+        "CURRENCY": "CNY",
+        "TOTAL_OPERATE_INCOME": 54702912385.23,
+        "OPERATE_COST": 5520729200.32,
+        "PARENT_NETPROFIT": 27242512886.45,
+        "FE_INTEREST_EXPENSE": 15366726.62,
+        "TOTAL_PROFIT": 37543249644.02
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2025-12-31 00:00:00",
+        "REPORT_TYPE": "年报",
+        "REPORT_DATE_NAME": "2025年报",
+        "CURRENCY": "CNY",
+        "TOTAL_OPERATE_INCOME": 172054171890.91,
+        "OPERATE_COST": 14892277570.91,
+        "PARENT_NETPROFIT": 82320067101.68,
+        "FE_INTEREST_EXPENSE": 28734948.29,
+        "TOTAL_PROFIT": 114755261605.08
+      },
+      {
+        "SECUCODE": "600519.SH",
+        "SECURITY_CODE": "600519",
+        "REPORT_DATE": "2025-09-30 00:00:00",
+        "REPORT_TYPE": "三季报",
+        "REPORT_DATE_NAME": "2025三季报",
+        "CURRENCY": "CNY",
+        "TOTAL_OPERATE_INCOME": 130903889634.88,
+        "OPERATE_COST": 11183972073.77,
+        "PARENT_NETPROFIT": 64626746712.18,
+        "FE_INTEREST_EXPENSE": 6505588.51,
+        "TOTAL_PROFIT": 89403444454.68
+      }
+    ],
+    "count": 103
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+}
