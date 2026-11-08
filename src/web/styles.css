@@ -1,0 +1,42 @@
+:root {
+  color: #221c16;
+  background: #efe6d6;
+  font-family: "Avenir Next", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+  line-height: 1.6;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+.page { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+.hero { display: flex; gap: 20px; align-items: center; margin-bottom: 24px; }
+.seal { width: 72px; height: 72px; border: 2px solid #9d2c2a; color: #9d2c2a; display: grid; place-items: center; border-radius: 50%; font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 32px; }
+.eyebrow { letter-spacing: .16em; color: #8a6a32; margin: 0; }
+h1, h2, h3, h4 { font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif CJK SC", serif; line-height: 1.25; }
+h1 { margin: 0; font-size: 42px; }
+.panel, .chart, .metric, .split article, .report { background: #fbf7ef; border: 1px solid #e2d5c3; border-radius: 18px; }
+.panel { display: grid; gap: 8px; padding: 18px; }
+input { border: 1px solid #d8c8b2; background: white; border-radius: 10px; padding: 10px 12px; }
+button, .toolbar a { background: #9d2c2a; color: white; border: 0; border-radius: 999px; padding: 10px 16px; text-decoration: none; cursor: pointer; }
+button:disabled { opacity: .6; cursor: progress; }
+.status { min-height: 1.5em; }
+.metrics, .chart-grid, .split { display: grid; gap: 14px; margin-top: 14px; }
+.metrics, .split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.metric, .split article, .chart { padding: 16px; }
+.metric p, .metric small, .muted { color: #6d6256; }
+.metric strong { display: block; font-size: 28px; }
+.chart-canvas { height: 280px; }
+.toolbar { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+.report { padding: 8px 22px 28px; margin-top: 14px; }
+.report pre { overflow-x: auto; background: #f3ecdf; padding: 10px; border-radius: 10px; }
+@media (max-width: 800px) {
+  .metrics, .chart-grid, .split, .hero { grid-template-columns: 1fr; display: grid; }
+  h1 { font-size: 32px; }
+}
+@media print {
+  .noprint { display: none !important; }
+  body { background: white; }
+  .page { max-width: none; }
+  .chart, .report { break-inside: avoid; }
+}
